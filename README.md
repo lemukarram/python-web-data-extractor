@@ -1,55 +1,52 @@
-# Universal Data Extractor API
+# Universal Data Extractor Tool
 
-A lightweight web-based data extraction tool built with Python and Flask. This application allows users to fetch and format structured data directly into a clean, copy-pasteable format for spreadsheet applications like Microsoft Excel or Google Sheets.
+This is a simple tool to extract information from web pages and save it into an Excel-friendly CSV file. It is designed to be run on your personal computer, which helps avoid being blocked by websites.
 
-## Features
+## How to Set Up (One-Time Only)
 
-- **Web API Interface**: Simple query parameter-based data fetching (`?page=1`).
-- **Cloudflare/Bot Bypass**: Built with `curl_cffi` to perfectly impersonate a real browser's TLS fingerprint, preventing 403 blocks from target servers.
-- **Secure Setup**: Target URLs are stored securely in environment variables, keeping the source code generic and clean for public repositories.
-- **Excel-Friendly Output**: Data is rendered in a standard HTML table format that can be directly copied and pasted into Excel with perfect formatting.
+Follow these steps if you have never run a Python script before.
 
-## Deployment
+### Step 1: Install Python
+1. Go to [python.org/downloads](https://www.python.org/downloads/).
+2. Click the **Download Python** button.
+3. **Important:** When installing, make sure to check the box that says **"Add Python to PATH"** before clicking "Install Now".
 
-This application is designed to be deployed on platforms like **Render**, **Heroku**, or any cloud provider supporting Python/Flask.
+### Step 2: Download this Tool
+1. Click the green **"Code"** button on this GitHub page.
+2. Select **"Download ZIP"**.
+3. Extract (unzip) the folder to your Desktop or anywhere you like.
 
-### Deploy to Render
-1. Connect your GitHub repository to Render.
-2. Select "Web Service".
-3. Use the following settings:
-   - **Runtime**: `Python 3`
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `gunicorn app:app`
-4. **Environment Variables**: You MUST add the following environment variable in your Render dashboard:
-   - **Key**: `TARGET_BASE_URL`
-   - **Value**: `https://example.com/source/contractors?page=` (Replace with your actual target URL, ending right before the page number).
-
-## Usage
-
-Once deployed and the environment variable is set, access the API using the `page` parameter:
-
-```
-https://your-app-name.onrender.com/?page=1
-```
-
-The application will extract the relevant data points for that page and display them in a table.
-
-## Local Development
-
-1. Clone the repository.
-2. Install dependencies:
+### Step 3: Install Required Libraries
+1. Open your computer's terminal:
+   - **Windows**: Search for `cmd` or `Command Prompt` in your start menu.
+   - **Mac**: Search for `Terminal` in Spotlight (Command + Space).
+2. Type the following command and press Enter:
    ```bash
-   pip install -r requirements.txt
+   pip install curl-cffi beautifulsoup4 requests
    ```
-3. Set your environment variable:
+
+---
+
+## How to Run the Tool
+
+1. Open your terminal (as shown in Step 3 above).
+2. Navigate to the folder where you extracted the tool. For example:
    ```bash
-   export TARGET_BASE_URL="https://example.com/source/contractors?page="
+   cd Desktop/python-web-data-extractor
    ```
-4. Run the application:
+3. Run the script:
    ```bash
-   python app.py
+   python extractor.py
    ```
-5. Open `http://localhost:5000/?page=1` in your browser.
+   *(Note: On some Macs, you might need to type `python3 extractor.py` instead)*
+
+4. The script will ask you to **"Please paste the full URL"**.
+5. Copy the URL from your browser (e.g., `https://.../path?page=3`) and paste it into the terminal, then press Enter.
+6. Once finished, a new file named after the page number (e.g., `3.csv`) will appear in the same folder. You can open this file directly with **Microsoft Excel**.
+
+## Troubleshooting
+- **403 Error**: If you see this, the website is blocking the request. Try using a VPN or checking if you can access the website normally in your browser.
+- **Python not found**: Ensure you checked the "Add Python to PATH" box during installation. If not, reinstall Python and make sure it's checked.
 
 ## License
 MIT
