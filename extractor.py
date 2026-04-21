@@ -1,17 +1,47 @@
 import os
+import sys
+import subprocess
 import time
 import re
 import csv
 from urllib.parse import urlparse, parse_qs, urljoin
 
-# Using curl_cffi to bypass advanced bot protection
-try:
-    from curl_cffi import requests
-except ImportError:
-    print("\n[!] Error: 'curl_cffi' library not found.")
-    print("[!] Please run: pip install curl-cffi")
-    exit(1)
+def install_dependencies():
+    """Automatically detects missing libraries and installs them based on the OS."""
+    required = {'curl-cffi', 'beautifulsoup4', 'requests'}
+    
+    # Try to import them to see if they are missing
+    missing = []
+    try: import curl_cffi
+    except ImportError: missing.append('curl-cffi')
+    try: import bs4
+    except ImportError: missing.append('beautifulsoup4')
+    try: import requests
+    except ImportError: missing.append('requests')
 
+    if missing:
+        print(f"\n[!] Missing required components: {', '.join(missing)}")
+        print("[+] Starting automatic installation, please wait...")
+        
+        # Determine the correct pip command based on the OS/Python environment
+        # Mac/Linux usually need 'python3 -m pip', Windows usually just 'pip'
+        pip_cmd = [sys.executable, "-m", "pip", "install"] + missing
+        
+        try:
+            subprocess.check_call(pip_cmd)
+            print("[SUCCESS] All components installed successfully!\n")
+            # Restart the script to load the newly installed libraries
+            os.execl(sys.executable, sys.executable, *sys.argv)
+        except Exception as e:
+            print(f"\n[!] Automatic installation failed: {e}")
+            print(f"[!] Please try running this manually: {' '.join(pip_cmd)}")
+            sys.exit(1)
+
+# Run the installer before anything else
+install_dependencies()
+
+# Now we can safely import the libraries
+from curl_cffi import requests
 from bs4 import BeautifulSoup
 
 def decode_cloudflare_email(encoded_string):
@@ -24,18 +54,14 @@ def decode_cloudflare_email(encoded_string):
 
 def get_email_from_detail(detail_url, session):
     try:
-        # Subtle delay to avoid being flagged
         time.sleep(1)
         response = session.get(detail_url, timeout=15)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Check for Cloudflare protected email
             email_element = soup.find(class_='__cf_email__')
             if email_element and email_element.get('data-cfemail'):
                 return decode_cloudflare_email(email_element.get('data-cfemail'))
             
-            # Fallback to searching info boxes
             info_boxes = soup.find_all('div', class_='info-box')
             for box in info_boxes:
                 name = box.find('div', class_='info-name')
@@ -48,34 +74,28 @@ def get_email_from_detail(detail_url, session):
         return "N/A"
 
 def scrape_page(url):
-    # Re-extracting page number for the filename
     parsed_url = urlparse(url)
     params = parse_qs(parsed_url.query)
     page_num = params.get('page', ['unknown'])[0]
     filename = f"{page_num}.csv"
 
     print(f"\n[+] Connecting to the server...")
-    
-    # Impersonate Chrome to bypass TLS fingerprinting and 403 errors
     session = requests.Session(impersonate="chrome110")
     
     try:
         response = session.get(url, timeout=30)
-        
         if response.status_code != 200:
-            print(f"[!] Error: Server returned status code {response.status_code}")
-            if response.status_code == 403:
-                print("[!] The website is blocking the request. Try using a VPN or checking your internet connection.")
+            print(f"[!] Error: Status {response.status_code}. Site might be blocking you.")
             return
 
         soup = BeautifulSoup(response.text, 'html.parser')
         cards = soup.find_all(class_='section-card')
         
         if not cards:
-            print("[!] No data cards found on this page. Please verify the URL.")
+            print("[!] No data found. Please check the URL.")
             return
 
-        print(f"[+] Found {len(cards)} records. Starting data extraction...")
+        print(f"[+] Found {len(cards)} records. Extracting details...")
         
         page_data = []
         for index, card in enumerate(cards, 1):
@@ -83,7 +103,7 @@ def scrape_page(url):
             if not name_el: continue
             
             name = name_el.text.strip()
-            print(f"    ({index}/{len(cards)}) Extracting: {name[:40]}...")
+            print(f"    ({index}/{len(cards)}) {name[:40]}...")
             
             detail_link = None
             a_tag = name_el.find('a')
@@ -92,17 +112,16 @@ def scrape_page(url):
             
             size = "N/A"
             city = "N/A"
-            info_values = card.find_all('div', class_='info-box')
-            for box in info_values:
+            info_boxes = card.find_all('div', class_='info-box')
+            for box in info_boxes:
                 box_name = box.find('div', class_='info-name')
-                if box_name and 'Company Size' in box_name.text:
-                    box_val = box.find('div', class_='info-value')
-                    if box_val: size = box_val.text.strip()
-                
-                if box_name and 'City' in box_name.text:
-                    box_val = box.find('div', class_='info-value')
-                    if box_val: 
-                        city = box_val.text.strip().replace('\n', '').replace('  ', ' ')
+                if box_name:
+                    if 'Company Size' in box_name.text:
+                        val = box.find('div', class_='info-value')
+                        if val: size = val.text.strip()
+                    elif 'City' in box_name.text:
+                        val = box.find('div', class_='info-value')
+                        if val: city = val.text.strip().replace('\n', '').replace('  ', ' ')
             
             email = "N/A"
             if detail_link:
@@ -115,32 +134,26 @@ def scrape_page(url):
                 "Company Size": size
             })
 
-        # Saving to CSV
         with open(filename, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=["Company Name", "Email", "City", "Company Size"])
             writer.writeheader()
             writer.writerows(page_data)
 
-        print(f"\n[SUCCESS] Data successfully saved to: {filename}")
-        print(f"[TIP] You can now open {filename} directly in Excel.")
+        print(f"\n[SUCCESS] Data saved to: {filename}")
+        print(f"[TIP] You can open this file in Excel.")
 
     except Exception as e:
-        print(f"\n[!] A critical error occurred: {str(e)}")
+        print(f"\n[!] Error: {str(e)}")
 
 def main():
     print("========================================")
     print("       UNIVERSAL DATA EXTRACTOR")
     print("========================================")
     
-    target_url = input("\nPlease paste the full URL (e.g., https://.../path?page=3):\n> ").strip()
-    
+    target_url = input("\nPlease paste the full URL:\n> ").strip()
     if not target_url.startswith("http"):
-        print("[!] Invalid URL. Please make sure it starts with http:// or https://")
+        print("[!] Invalid URL.")
         return
-
-    # Basic check to ensure it has a page parameter
-    if "page=" not in target_url:
-        print("[!] Warning: No 'page=' parameter found in the URL. Output file will be named 'unknown.csv'.")
     
     scrape_page(target_url)
 
@@ -148,5 +161,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\n[!] Script stopped by user.")
+        print("\n[!] Stopped.")
     input("\nPress Enter to exit...")
