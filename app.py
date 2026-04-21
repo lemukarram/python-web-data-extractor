@@ -1,27 +1,14 @@
-import requests
-from bs4 import BeautifulSoup
+import os
 import time
 import re
-import os
+from urllib.parse import urljoin
 from flask import Flask, request, render_template_string
-from urllib.parse import unquote, urlparse, parse_qsl, urlencode
+
+# curl_cffi acts as a drop-in replacement for requests but impersonates browser TLS fingerprints perfectly
+from curl_cffi import requests
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
-
-# Realistic headers to bypass basic bot detection (403 errors)
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Cache-Control": "max-age=0",
-}
 
 def decode_cloudflare_email(encoded_string):
     try:
@@ -33,8 +20,8 @@ def decode_cloudflare_email(encoded_string):
 
 def get_email_from_detail(detail_url, session):
     try:
-        time.sleep(0.5) # Slightly longer delay to be safer
-        response = session.get(detail_url, headers=HEADERS, timeout=15)
+        time.sleep(0.5) # Gentle delay between requests
+        response = session.get(detail_url, timeout=15)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             email_element = soup.find(class_='__cf_email__')
@@ -53,18 +40,20 @@ def get_email_from_detail(detail_url, session):
         return "N/A"
 
 def scrape_page_data(url):
-    session = requests.Session()
+    # impersonate="chrome110" makes this request appear exactly like a real Chrome browser, 
+    # helping to bypass strict Cloudflare or 403 blocks.
+    session = requests.Session(impersonate="chrome110")
     try:
-        # Initial request to the page
-        response = session.get(url, headers=HEADERS, timeout=25)
+        response = session.get(url, timeout=30)
+        
         if response.status_code != 200:
-            return None, f"Failed to fetch page: {response.status_code}. The site might be blocking the request."
+            return None, f"Failed to fetch page: HTTP {response.status_code}. The site might still be blocking cloud hosting."
         
         soup = BeautifulSoup(response.text, 'html.parser')
         cards = soup.find_all(class_='section-card')
         
         if not cards:
-            return None, "No data cards found on the page. The page structure might have changed or the URL is incorrect."
+            return None, "No data found on this page. Either the page is empty, or the HTML structure of the target site has changed."
 
         page_data = []
         for card in cards:
@@ -72,7 +61,11 @@ def scrape_page_data(url):
             if not name_el: continue
             
             name = name_el.text.strip()
-            detail_link = name_el.find('a')['href']
+            
+            detail_link = None
+            a_tag = name_el.find('a')
+            if a_tag and 'href' in a_tag.attrs:
+                detail_link = urljoin(url, a_tag['href'])
             
             size = "N/A"
             city = "N/A"
@@ -88,7 +81,9 @@ def scrape_page_data(url):
                     if box_val: 
                         city = box_val.text.strip().replace('\n', '').replace('  ', ' ')
             
-            email = get_email_from_detail(detail_link, session)
+            email = "N/A"
+            if detail_link:
+                email = get_email_from_detail(detail_link, session)
             
             page_data.append({
                 "Company Name": name,
@@ -115,7 +110,7 @@ HTML_TEMPLATE = """
         tr:nth-child(even) { background-color: #f8f9fa; }
         tr:hover { background-color: #f1f2f6; }
         .instructions { background: #fdfdfd; padding: 20px; border-left: 5px solid #3498db; margin-bottom: 30px; }
-        code { background: #eee; padding: 2px 5px; border-radius: 3px; font-family: monospace; }
+        code { background: #eee; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 1.1em; }
         .error { background: #fab1a0; color: #c0392b; padding: 15px; border-radius: 5px; margin-top: 20px; font-weight: bold; }
         .success-msg { color: #27ae60; font-weight: bold; margin-top: 20px; }
     </style>
@@ -124,12 +119,17 @@ HTML_TEMPLATE = """
     <div class="container">
         <h1>Data Extraction Tool</h1>
         
-        {% if not data and not error %}
+        {% if not setup_complete %}
+            <div class="error">
+                Setup Incomplete: You must set the <code>TARGET_BASE_URL</code> environment variable in your Render dashboard.
+            </div>
+            <p>Example value: <code>https://example.com/en/contractors?page=</code></p>
+        {% elif not data and not error %}
         <div class="instructions">
             <h3>How to use:</h3>
-            <p>Append the <code>fetch</code> parameter to the URL with the target page URL you want to extract.</p>
+            <p>Append the <code>page</code> parameter to the URL to fetch data for that specific page number.</p>
             <p><strong>Example:</strong><br>
-            <code>?fetch=https://example-source.com/data?page=1</code></p>
+            <code>/?page=1</code></p>
         </div>
         {% endif %}
 
@@ -137,11 +137,10 @@ HTML_TEMPLATE = """
             <div class="error">
                 Status: {{ error }}
             </div>
-            <p><em>Note: A 403 error usually means the source website is blocking cloud hosting IPs (like Render). Try again in a few minutes or check the source URL.</em></p>
         {% endif %}
 
         {% if data %}
-            <div class="success-msg">Successfully extracted {{ data|length }} records.</div>
+            <div class="success-msg">Successfully extracted {{ data|length }} records for page {{ current_page }}.</div>
             <p>You can now highlight the table below, copy it, and paste it directly into Excel or Google Sheets.</p>
             <table>
                 <thead>
@@ -171,37 +170,28 @@ HTML_TEMPLATE = """
 
 @app.route('/')
 def index():
-    # Robustly get the 'fetch' URL. 
-    # Flask sometimes splits query parameters if they aren't encoded.
-    # We reconstruct the intended URL from all parameters.
-    fetch_url = request.args.get('fetch')
-    if not fetch_url:
-        return render_template_string(HTML_TEMPLATE)
-
-    # Reconstruct the URL if it contained a '?' that was split into other args
-    all_args = list(request.args.items())
-    if len(all_args) > 1:
-        # The first arg is 'fetch'. The rest likely belong to the fetch_url.
-        base_fetch = all_args[0][1]
-        extra_params = []
-        for i in range(1, len(all_args)):
-            extra_params.append(f"{all_args[i][0]}={all_args[i][1]}")
-        
-        separator = '&' if '?' in base_fetch else '?'
-        fetch_url = f"{base_fetch}{separator}{'&'.join(extra_params)}"
-
-    # Validation: Use a generic pattern to hide the specific target domain
-    # This matches: m (4-6 chars) l .org / ... / contractors?page=X
-    default_pattern = r'^https://m.{4,6}l\.org/.+/contractors\?page=\d+$'
-    allowed_pattern = os.environ.get('ALLOWED_URL_PATTERN', default_pattern)
+    # Read the base URL from the environment. 
+    # The URL should look like "https://target-domain.com/path?page="
+    target_base_url = os.environ.get('TARGET_BASE_URL')
     
-    if not re.match(allowed_pattern, fetch_url):
-        return render_template_string(HTML_TEMPLATE, error="Invalid or unauthorized Source URL. Please provide a valid page URL.")
+    if not target_base_url:
+        return render_template_string(HTML_TEMPLATE, setup_complete=False)
+
+    page_num = request.args.get('page')
+    
+    if not page_num:
+        return render_template_string(HTML_TEMPLATE, setup_complete=True)
+
+    # Validate that page is a number
+    if not page_num.isdigit():
+        return render_template_string(HTML_TEMPLATE, setup_complete=True, error="Invalid page number. It must be an integer.")
+
+    # Construct the final URL securely without passing domains via query params
+    fetch_url = f"{target_base_url}{page_num}"
 
     data, error = scrape_page_data(fetch_url)
-    return render_template_string(HTML_TEMPLATE, data=data, error=error)
+    return render_template_string(HTML_TEMPLATE, setup_complete=True, data=data, error=error, current_page=page_num)
 
 if __name__ == '__main__':
-    # Use port from environment for deployment flexibility
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
