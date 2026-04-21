@@ -20,10 +20,9 @@ Follow these steps if you have never run a Python script before.
 1. Open your computer's terminal:
    - **Windows**: Search for `cmd` or `Command Prompt` in your start menu.
    - **Mac**: Search for `Terminal` in Spotlight (Command + Space).
-2. Type the following command and press Enter:
-   ```bash
-   pip install curl-cffi beautifulsoup4 requests
-   ```
+2. Copy and paste the command below that matches your computer:
+   - **Windows**: `pip install curl-cffi beautifulsoup4 requests`
+   - **Mac / Linux**: `python3 -m pip install curl-cffi beautifulsoup4 requests`
 
 ---
 
