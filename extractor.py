@@ -4,7 +4,8 @@ import subprocess
 import time
 import re
 import csv
-from urllib.parse import urlparse, parse_qs, urljoin
+from datetime import datetime
+from urllib.parse import urlparse, parse_qs, urljoin, urlencode, urlunparse
 
 def install_dependencies():
     """Automatically detects missing libraries and installs them based on the OS."""
@@ -44,6 +45,10 @@ install_dependencies()
 from curl_cffi import requests
 from bs4 import BeautifulSoup
 
+# Global filename to ensure appending to the same file across multiple runs.
+# You can rename this file after you are done with your collection.
+OUTPUT_FILENAME = "data.csv"
+
 def decode_cloudflare_email(encoded_string):
     try:
         r = int(encoded_string[:2], 16)
@@ -73,12 +78,7 @@ def get_email_from_detail(detail_url, session):
     except Exception:
         return "N/A"
 
-def scrape_page(url):
-    parsed_url = urlparse(url)
-    params = parse_qs(parsed_url.query)
-    page_num = params.get('page', ['unknown'])[0]
-    filename = f"{page_num}.csv"
-
+def scrape_page(url, filename):
     print(f"\n[+] Connecting to the server...")
     session = requests.Session(impersonate="chrome110")
     
@@ -127,20 +127,26 @@ def scrape_page(url):
             if detail_link:
                 email = get_email_from_detail(detail_link, session)
             
+            # Map to new structure
             page_data.append({
-                "Company Name": name,
+                "Contact name": "",
                 "Email": email,
+                "Company": name,
+                "Designation": "",
                 "City": city,
                 "Company Size": size
             })
 
-        with open(filename, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=["Company Name", "Email", "City", "Company Size"])
-            writer.writeheader()
+        file_exists = os.path.isfile(filename)
+        fieldnames = ["Contact name", "Email", "Company", "Designation", "City", "Company Size"]
+        
+        with open(filename, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
             writer.writerows(page_data)
 
-        print(f"\n[SUCCESS] Data saved to: {filename}")
-        print(f"[TIP] You can open this file in Excel.")
+        print(f"\n[SUCCESS] Data appended to: {filename}")
 
     except Exception as e:
         print(f"\n[!] Error: {str(e)}")
@@ -155,7 +161,16 @@ def main():
         print("[!] Invalid URL.")
         return
     
-    scrape_page(target_url)
+    # Generate a filename for this specific run, but mention it can be appended to.
+    # If the user wants to append to an EXISTING file, they might want to specify it.
+    # For now, we use a single file for the duration of the script execution.
+    filename = OUTPUT_FILENAME
+    
+    # Detect if multiple pages are needed
+    scrape_page(target_url, filename)
+    
+    # Optional: Logic to handle multiple pages automatically if desired
+    # For now, it respects the full URL provided with all params.
 
 if __name__ == "__main__":
     try:
