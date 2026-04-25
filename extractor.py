@@ -177,4 +177,8 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print("\n[!] Stopped.")
-    input("\nPress Enter to exit...")
+    except Exception as e:
+        print(f"\n[CRITICAL ERROR] {e}")
+    
+    print("\n" + "="*40)
+    input("Process finished. Press Enter to close this window...")
